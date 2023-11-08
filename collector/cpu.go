@@ -6,27 +6,21 @@ package collector
 import (
 	"strings"
 
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func init() {
-	var deps string
-	// See below for 6.05 magic value
-	if getWindowsVersion() > 6.05 {
-		deps = "Processor Information"
-	} else {
-		deps = "Processor"
-	}
-	registerCollector("cpu", newCPUCollector, deps)
-}
-
 type cpuCollectorBasic struct {
+	logger log.Logger
+
 	CStateSecondsTotal *prometheus.Desc
 	TimeTotal          *prometheus.Desc
 	InterruptsTotal    *prometheus.Desc
 	DPCsTotal          *prometheus.Desc
 }
 type cpuCollectorFull struct {
+	logger log.Logger
+
 	CStateSecondsTotal       *prometheus.Desc
 	TimeTotal                *prometheus.Desc
 	InterruptsTotal          *prometheus.Desc
@@ -37,13 +31,18 @@ type cpuCollectorFull struct {
 	ProcessorFrequencyMHz    *prometheus.Desc
 	ProcessorMaxFrequencyMHz *prometheus.Desc
 	ProcessorPerformance     *prometheus.Desc
+	ProcessorMPerf           *prometheus.Desc
+	ProcessorRTC             *prometheus.Desc
+	ProcessorUtility         *prometheus.Desc
+	ProcessorPrivUtility     *prometheus.Desc
 }
 
 // newCPUCollector constructs a new cpuCollector, appropriate for the running OS
-func newCPUCollector() (Collector, error) {
+func newCPUCollector(logger log.Logger) (Collector, error) {
 	const subsystem = "cpu"
+	logger = log.With(logger, "collector", subsystem)
 
-	version := getWindowsVersion()
+	version := getWindowsVersion(logger)
 	// For Windows 2008 (version 6.0) or earlier we only have the "Processor"
 	// class. As of Windows 2008 R2 (version 6.1) the more detailed
 	// "Processor Information" set is available (although some of the counters
@@ -52,6 +51,7 @@ func newCPUCollector() (Collector, error) {
 	// Value 6.05 was selected to split between Windows versions.
 	if version < 6.05 {
 		return &cpuCollectorBasic{
+			logger: logger,
 			CStateSecondsTotal: prometheus.NewDesc(
 				prometheus.BuildFQName(Namespace, subsystem, "cstate_seconds_total"),
 				"Time spent in low-power idle state",
@@ -80,6 +80,7 @@ func newCPUCollector() (Collector, error) {
 	}
 
 	return &cpuCollectorFull{
+		logger: logger,
 		CStateSecondsTotal: prometheus.NewDesc(
 			prometheus.BuildFQName(Namespace, subsystem, "cstate_seconds_total"),
 			"Time spent in low-power idle state",
@@ -129,8 +130,32 @@ func newCPUCollector() (Collector, error) {
 			nil,
 		),
 		ProcessorPerformance: prometheus.NewDesc(
-			prometheus.BuildFQName(Namespace, subsystem, "processor_performance"),
+			prometheus.BuildFQName(Namespace, subsystem, "processor_performance_total"),
 			"Processor Performance is the average performance of the processor while it is executing instructions, as a percentage of the nominal performance of the processor. On some processors, Processor Performance may exceed 100%",
+			[]string{"core"},
+			nil,
+		),
+		ProcessorMPerf: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "processor_mperf_total"),
+			"Processor MPerf is the number of TSC ticks incremented while executing instructions",
+			[]string{"core"},
+			nil,
+		),
+		ProcessorRTC: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "processor_rtc_total"),
+			"Processor RTC represents the number of RTC ticks made since the system booted. It should consistently be 64e6, and can be used to properly derive Processor Utility Rate",
+			[]string{"core"},
+			nil,
+		),
+		ProcessorUtility: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "processor_utility_total"),
+			"Processor Utility represents is the amount of time the core spends executing instructions",
+			[]string{"core"},
+			nil,
+		),
+		ProcessorPrivUtility: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "processor_privileged_utility_total"),
+			"Processor Privilieged Utility represents is the amount of time the core has spent executing instructions inside the kernel",
 			[]string{"core"},
 			nil,
 		),
@@ -158,7 +183,7 @@ type perflibProcessor struct {
 
 func (c *cpuCollectorBasic) Collect(ctx *ScrapeContext, ch chan<- prometheus.Metric) error {
 	data := make([]perflibProcessor, 0)
-	err := unmarshalObject(ctx.perfObjects["Processor"], &data)
+	err := unmarshalObject(ctx.perfObjects["Processor"], &data, c.logger)
 	if err != nil {
 		return err
 	}
@@ -258,14 +283,16 @@ type perflibProcessorInformation struct {
 	PrivilegedUtilitySeconds float64 `perflib:"% Privileged Utility"`
 	ProcessorFrequencyMHz    float64 `perflib:"Processor Frequency"`
 	ProcessorPerformance     float64 `perflib:"% Processor Performance"`
+	ProcessorMPerf           float64 `perflib:"% Processor Performance,secondvalue"`
 	ProcessorTimeSeconds     float64 `perflib:"% Processor Time"`
 	ProcessorUtilityRate     float64 `perflib:"% Processor Utility"`
+	ProcessorRTC             float64 `perflib:"% Processor Utility,secondvalue"`
 	UserTimeSeconds          float64 `perflib:"% User Time"`
 }
 
 func (c *cpuCollectorFull) Collect(ctx *ScrapeContext, ch chan<- prometheus.Metric) error {
 	data := make([]perflibProcessorInformation, 0)
-	err := unmarshalObject(ctx.perfObjects["Processor Information"], &data)
+	err := unmarshalObject(ctx.perfObjects["Processor Information"], &data, c.logger)
 	if err != nil {
 		return err
 	}
@@ -366,8 +393,32 @@ func (c *cpuCollectorFull) Collect(ctx *ScrapeContext, ch chan<- prometheus.Metr
 		)
 		ch <- prometheus.MustNewConstMetric(
 			c.ProcessorPerformance,
-			prometheus.GaugeValue,
+			prometheus.CounterValue,
 			cpu.ProcessorPerformance,
+			core,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.ProcessorMPerf,
+			prometheus.CounterValue,
+			cpu.ProcessorMPerf,
+			core,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.ProcessorRTC,
+			prometheus.CounterValue,
+			cpu.ProcessorRTC,
+			core,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.ProcessorUtility,
+			prometheus.CounterValue,
+			cpu.ProcessorUtilityRate,
+			core,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.ProcessorPrivUtility,
+			prometheus.CounterValue,
+			cpu.PrivilegedUtilitySeconds,
 			core,
 		)
 	}

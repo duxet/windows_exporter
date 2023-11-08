@@ -4,13 +4,15 @@ import (
 	"reflect"
 	"testing"
 
-	perflibCollector "github.com/leoluk/perflib_exporter/collector"
-	"github.com/leoluk/perflib_exporter/perflib"
+	"github.com/prometheus-community/windows_exporter/perflib"
+
+	"github.com/go-kit/log"
 )
 
 type simple struct {
 	ValA float64 `perflib:"Something"`
 	ValB float64 `perflib:"Something Else"`
+	ValC float64 `perflib:"Something Else,secondvalue"`
 }
 
 func TestUnmarshalPerflib(t *testing.T) {
@@ -36,7 +38,7 @@ func TestUnmarshalPerflib(t *testing.T) {
 							{
 								Def: &perflib.PerfCounterDef{
 									Name:        "Something",
-									CounterType: perflibCollector.PERF_COUNTER_COUNTER,
+									CounterType: perflib.PERF_COUNTER_COUNTER,
 								},
 								Value: 123,
 							},
@@ -56,22 +58,24 @@ func TestUnmarshalPerflib(t *testing.T) {
 							{
 								Def: &perflib.PerfCounterDef{
 									Name:        "Something",
-									CounterType: perflibCollector.PERF_COUNTER_COUNTER,
+									CounterType: perflib.PERF_COUNTER_COUNTER,
 								},
 								Value: 123,
 							},
 							{
 								Def: &perflib.PerfCounterDef{
-									Name:        "Something Else",
-									CounterType: perflibCollector.PERF_COUNTER_COUNTER,
+									Name:           "Something Else",
+									CounterType:    perflib.PERF_COUNTER_COUNTER,
+									HasSecondValue: true,
 								},
-								Value: 256,
+								Value:       256,
+								SecondValue: 222,
 							},
 						},
 					},
 				},
 			},
-			expectedOutput: []simple{{ValA: 123, ValB: 256}},
+			expectedOutput: []simple{{ValA: 123, ValB: 256, ValC: 222}},
 			expectError:    false,
 		},
 		{
@@ -83,7 +87,7 @@ func TestUnmarshalPerflib(t *testing.T) {
 							{
 								Def: &perflib.PerfCounterDef{
 									Name:        "Something",
-									CounterType: perflibCollector.PERF_COUNTER_COUNTER,
+									CounterType: perflib.PERF_COUNTER_COUNTER,
 								},
 								Value: 321,
 							},
@@ -94,7 +98,7 @@ func TestUnmarshalPerflib(t *testing.T) {
 							{
 								Def: &perflib.PerfCounterDef{
 									Name:        "Something",
-									CounterType: perflibCollector.PERF_COUNTER_COUNTER,
+									CounterType: perflib.PERF_COUNTER_COUNTER,
 								},
 								Value: 231,
 							},
@@ -109,7 +113,7 @@ func TestUnmarshalPerflib(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			output := make([]simple, 0)
-			err := unmarshalObject(c.obj, &output)
+			err := unmarshalObject(c.obj, &output, log.NewNopLogger())
 			if err != nil && !c.expectError {
 				t.Errorf("Did not expect error, got %q", err)
 			}

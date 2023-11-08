@@ -11,19 +11,21 @@ Enabled by default? | Yes
 
 ## Flags
 
-### `--collector.logical_disk.volume-whitelist`
+### `--collector.logical_disk.volume-include`
 
-If given, a disk needs to match the whitelist regexp in order for the corresponding disk metrics to be reported
+If given, a disk needs to match the include regexp in order for the corresponding disk metrics to be reported
 
-### `--collector.logical_disk.volume-blacklist`
+### `--collector.logical_disk.volume-exclude`
 
-If given, a disk needs to *not* match the blacklist regexp in order for the corresponding disk metrics to be reported
+If given, a disk needs to *not* match the exclude regexp in order for the corresponding disk metrics to be reported
 
 ## Metrics
 
 Name | Description | Type | Labels
 -----|-------------|------|-------
 `requests_queued` | Number of requests outstanding on the disk at the time the performance data is collected | gauge | `volume`
+`avg_read_requests_queued` | Average number of read requests that were queued for the selected disk during the sample interval | gauge | `volume`
+`avg_write_requests_queued` | Average number of write requests that were queued for the selected disk during the sample interval | gauge | `volume`
 `read_bytes_total` | Rate at which bytes are transferred from the disk during read operations | counter | `volume`
 `reads_total` | Rate of read operations on the disk | counter | `volume`
 `write_bytes_total` | Rate at which bytes are transferred to the disk during write operations  | counter | `volume`

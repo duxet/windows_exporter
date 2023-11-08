@@ -3,17 +3,16 @@ package collector
 import (
 	"strconv"
 
-	"github.com/StackExchange/wmi"
-	"github.com/prometheus-community/windows_exporter/log"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/yusufpapurcu/wmi"
 )
-
-func init() {
-	registerCollector("open_hardware_monitor", NewOpenHardwareMonitorCollector)
-}
 
 // A openHardwareMonitorCollector is a Prometheus collector for WMI Sensor metrics
 type SensorCollector struct {
+	logger log.Logger
+
 	SensorType *prometheus.Desc
 	Identifier *prometheus.Desc
 	Parent     *prometheus.Desc
@@ -25,9 +24,10 @@ type SensorCollector struct {
 }
 
 // NewOpenHardwareMonitorCollector ...
-func NewOpenHardwareMonitorCollector() (Collector, error) {
+func NewOpenHardwareMonitorCollector(logger log.Logger) (Collector, error) {
 	const subsystem = "open_hardware_monitor"
 	return &SensorCollector{
+		logger: log.With(logger, "collector", subsystem),
 		Value: prometheus.NewDesc(
 			prometheus.BuildFQName(Namespace, subsystem, "sensor_value"),
 			"Provides the value from an OpenHardwareMonitor sensor.",
@@ -41,7 +41,7 @@ func NewOpenHardwareMonitorCollector() (Collector, error) {
 // to the provided prometheus Metric channel.
 func (c *SensorCollector) Collect(ctx *ScrapeContext, ch chan<- prometheus.Metric) error {
 	if desc, err := c.collect(ch); err != nil {
-		log.Error("failed collecting openHardwareMonitor metrics:", desc, err)
+		_ = level.Error(c.logger).Log("failed collecting openHardwareMonitor metrics:", desc, err)
 		return err
 	}
 	return nil
@@ -61,7 +61,7 @@ type Sensor struct {
 
 func (c *SensorCollector) collect(ch chan<- prometheus.Metric) (*prometheus.Desc, error) {
 	var dst []Sensor
-	q := queryAll(&dst)
+	q := queryAll(&dst, c.logger)
 	if err := wmi.QueryNamespace(q, &dst, "root/OpenHardwareMonitor"); err != nil {
 		return nil, err
 	}

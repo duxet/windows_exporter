@@ -4,35 +4,45 @@
 package collector
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 
-	"github.com/prometheus-community/windows_exporter/log"
+	"github.com/alecthomas/kingpin/v2"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-func init() {
-	registerCollector("net", NewNetworkCollector, "Network Interface")
-}
+const (
+	FlagNicOldExclude = "collector.net.nic-blacklist"
+	FlagNicOldInclude = "collector.net.nic-whitelist"
+
+	FlagNicExclude = "collector.net.nic-exclude"
+	FlagNicInclude = "collector.net.nic-include"
+)
 
 var (
-	nicWhitelist = kingpin.Flag(
-		"collector.net.nic-whitelist",
-		"Regexp of NIC:s to whitelist. NIC name must both match whitelist and not match blacklist to be included.",
-	).Default(".+").String()
-	nicBlacklist = kingpin.Flag(
-		"collector.net.nic-blacklist",
-		"Regexp of NIC:s to blacklist. NIC name must both match whitelist and not match blacklist to be included.",
-	).Default("").String()
+	nicOldInclude *string
+	nicOldExclude *string
+
+	nicInclude *string
+	nicExclude *string
+
+	nicIncludeSet bool
+	nicExcludeSet bool
+
 	nicNameToUnderscore = regexp.MustCompile("[^a-zA-Z0-9]")
 )
 
 // A NetworkCollector is a Prometheus collector for Perflib Network Interface metrics
 type NetworkCollector struct {
+	logger log.Logger
+
 	BytesReceivedTotal       *prometheus.Desc
 	BytesSentTotal           *prometheus.Desc
 	BytesTotal               *prometheus.Desc
+	OutputQueueLength        *prometheus.Desc
 	PacketsOutboundDiscarded *prometheus.Desc
 	PacketsOutboundErrors    *prometheus.Desc
 	PacketsTotal             *prometheus.Desc
@@ -43,15 +53,63 @@ type NetworkCollector struct {
 	PacketsSentTotal         *prometheus.Desc
 	CurrentBandwidth         *prometheus.Desc
 
-	nicWhitelistPattern *regexp.Regexp
-	nicBlacklistPattern *regexp.Regexp
+	nicIncludePattern *regexp.Regexp
+	nicExcludePattern *regexp.Regexp
 }
 
-// NewNetworkCollector ...
-func NewNetworkCollector() (Collector, error) {
+// newNetworkCollectorFlags ...
+func newNetworkCollectorFlags(app *kingpin.Application) {
+	nicInclude = app.Flag(
+		FlagNicInclude,
+		"Regexp of NIC:s to include. NIC name must both match include and not match exclude to be included.",
+	).Default(".+").PreAction(func(c *kingpin.ParseContext) error {
+		nicIncludeSet = true
+		return nil
+	}).String()
+
+	nicExclude = app.Flag(
+		FlagNicExclude,
+		"Regexp of NIC:s to exclude. NIC name must both match include and not match exclude to be included.",
+	).Default("").PreAction(func(c *kingpin.ParseContext) error {
+		nicExcludeSet = true
+		return nil
+	}).String()
+
+	nicOldInclude = app.Flag(
+		FlagNicOldInclude,
+		"DEPRECATED: Use --collector.net.nic-include",
+	).Hidden().String()
+	nicOldExclude = app.Flag(
+		FlagNicOldExclude,
+		"DEPRECATED: Use --collector.net.nic-exclude",
+	).Hidden().String()
+
+}
+
+// newNetworkCollector ...
+func newNetworkCollector(logger log.Logger) (Collector, error) {
 	const subsystem = "net"
+	logger = log.With(logger, "collector", subsystem)
+
+	if *nicOldExclude != "" {
+		if !nicExcludeSet {
+			_ = level.Warn(logger).Log("msg", "--collector.net.nic-blacklist is DEPRECATED and will be removed in a future release, use --collector.net.nic-exclude")
+			*nicExclude = *nicOldExclude
+		} else {
+			return nil, errors.New("--collector.net.nic-blacklist and --collector.net.nic-exclude are mutually exclusive")
+		}
+	}
+	if *nicOldInclude != "" {
+		if !nicIncludeSet {
+			_ = level.Warn(logger).Log("msg", "--collector.net.nic-whitelist is DEPRECATED and will be removed in a future release, use --collector.net.nic-include")
+			*nicInclude = *nicOldInclude
+		} else {
+			return nil, errors.New("--collector.net.nic-whitelist and --collector.net.nic-include are mutually exclusive")
+		}
+	}
 
 	return &NetworkCollector{
+		logger: logger,
 		BytesReceivedTotal: prometheus.NewDesc(
 			prometheus.BuildFQName(Namespace, subsystem, "bytes_received_total"),
 			"(Network.BytesReceivedPerSec)",
@@ -67,6 +125,12 @@ func NewNetworkCollector() (Collector, error) {
 		BytesTotal: prometheus.NewDesc(
 			prometheus.BuildFQName(Namespace, subsystem, "bytes_total"),
 			"(Network.BytesTotalPerSec)",
+			[]string{"nic"},
+			nil,
+		),
+		OutputQueueLength: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "output_queue_length_packets"),
+			"(Network.OutputQueueLength)",
 			[]string{"nic"},
 			nil,
 		),
@@ -125,8 +189,8 @@ func NewNetworkCollector() (Collector, error) {
 			nil,
 		),
 
-		nicWhitelistPattern: regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *nicWhitelist)),
-		nicBlacklistPattern: regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *nicBlacklist)),
+		nicIncludePattern: regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *nicInclude)),
+		nicExcludePattern: regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *nicExclude)),
 	}, nil
 }
 
@@ -134,7 +198,7 @@ func NewNetworkCollector() (Collector, error) {
 // to the provided prometheus Metric channel.
 func (c *NetworkCollector) Collect(ctx *ScrapeContext, ch chan<- prometheus.Metric) error {
 	if desc, err := c.collect(ctx, ch); err != nil {
-		log.Error("failed collecting net metrics:", desc, err)
+		_ = level.Error(c.logger).Log("failed collecting net metrics", "desc", desc, "err", err)
 		return err
 	}
 	return nil
@@ -153,6 +217,7 @@ type networkInterface struct {
 	BytesSentPerSec          float64 `perflib:"Bytes Sent/sec"`
 	BytesTotalPerSec         float64 `perflib:"Bytes Total/sec"`
 	Name                     string
+	OutputQueueLength        float64 `perflib:"Output Queue Length"`
 	PacketsOutboundDiscarded float64 `perflib:"Packets Outbound Discarded"`
 	PacketsOutboundErrors    float64 `perflib:"Packets Outbound Errors"`
 	PacketsPerSec            float64 `perflib:"Packets/sec"`
@@ -167,13 +232,13 @@ type networkInterface struct {
 func (c *NetworkCollector) collect(ctx *ScrapeContext, ch chan<- prometheus.Metric) (*prometheus.Desc, error) {
 	var dst []networkInterface
 
-	if err := unmarshalObject(ctx.perfObjects["Network Interface"], &dst); err != nil {
+	if err := unmarshalObject(ctx.perfObjects["Network Interface"], &dst, c.logger); err != nil {
 		return nil, err
 	}
 
 	for _, nic := range dst {
-		if c.nicBlacklistPattern.MatchString(nic.Name) ||
-			!c.nicWhitelistPattern.MatchString(nic.Name) {
+		if c.nicExcludePattern.MatchString(nic.Name) ||
+			!c.nicIncludePattern.MatchString(nic.Name) {
 			continue
 		}
 
@@ -199,6 +264,12 @@ func (c *NetworkCollector) collect(ctx *ScrapeContext, ch chan<- prometheus.Metr
 			c.BytesTotal,
 			prometheus.CounterValue,
 			nic.BytesTotalPerSec,
+			name,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.OutputQueueLength,
+			prometheus.GaugeValue,
+			nic.OutputQueueLength,
 			name,
 		)
 		ch <- prometheus.MustNewConstMetric(

@@ -6,6 +6,7 @@ This directory contains documentation of the collectors in the windows_exporter,
 - [`adfs`](collector.adfs.md)
 - [`cpu`](collector.cpu.md)
 - [`cs`](collector.cs.md)
+- [`diskdrive`](collector.diskdrive.md)]
 - [`dfsr`](collector.dfsr.md)
 - [`dhcp`](collector.dhcp.md)
 - [`dns`](collector.dns.md)
@@ -25,6 +26,7 @@ This directory contains documentation of the collectors in the windows_exporter,
 - [`netframework_clrremoting`](collector.netframework_clrremoting.md)
 - [`netframework_clrsecurity`](collector.netframework_clrsecurity.md)
 - [`net`](collector.net.md)
+- [`nps`](collector.nps.md)
 - [`os`](collector.os.md)
 - [`process`](collector.process.md)
 - [`remote_fx`](collector.remote_fx.md)

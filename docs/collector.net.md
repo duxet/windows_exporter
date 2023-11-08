@@ -11,13 +11,13 @@ Enabled by default? | Yes
 
 ## Flags
 
-### `--collector.net.nic-whitelist`
+### `--collector.net.nic-include`
 
-If given, an interface name needs to match the whitelist regexp in order for the corresponding metrics to be reported
+If given, an interface name needs to match the include regexp in order for the corresponding metrics to be reported
 
-### `--collector.net.nic-blacklist`
+### `--collector.net.nic-exclude`
 
-If given, an interface name needs to *not* match the blacklist regexp in order for the corresponding metrics to be reported
+If given, an interface name needs to *not* match the exclude regexp in order for the corresponding metrics to be reported
 
 ## Metrics
 
@@ -26,6 +26,7 @@ Name | Description | Type | Labels
 `windows_net_bytes_received_total` | Total bytes received by interface | counter | `nic`
 `windows_net_bytes_sent_total` | Total bytes transmitted by interface | counter | `nic`
 `windows_net_bytes_total` | Total bytes received and transmitted by interface | counter | `nic`
+`windows_net_output_queue_length_packets` | Length of the output packet queue (in packets). If this is longer than 2, delays occur. | gauge | `nic`
 `windows_net_packets_outbound_discarded_total` | Total outbound packets that were chosen to be discarded even though no errors had been detected to prevent transmission | counter | `nic`
 `windows_net_packets_outbound_errors_total` | Total packets that could not be transmitted due to errors | counter | `nic`
 `windows_net_packets_received_discarded_total` | Total inbound packets that were chosen to be discarded even though no errors had been detected to prevent delivery | counter | `nic`
