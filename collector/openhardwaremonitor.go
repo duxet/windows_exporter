@@ -13,14 +13,14 @@ import (
 type SensorCollector struct {
 	logger log.Logger
 
-	SensorType *prometheus.Desc
-	Identifier *prometheus.Desc
-	Parent     *prometheus.Desc
-	Name       *prometheus.Desc
-	Value      *prometheus.Desc
-	Max        *prometheus.Desc
-	Min        *prometheus.Desc
-	Index      *prometheus.Desc
+	Clock       *prometheus.Desc
+	Control     *prometheus.Desc
+	FanSpeed    *prometheus.Desc
+	Flow        *prometheus.Desc
+	Level       *prometheus.Desc
+	Load        *prometheus.Desc
+	Temperature *prometheus.Desc
+	Voltage     *prometheus.Desc
 }
 
 // NewOpenHardwareMonitorCollector ...
@@ -28,10 +28,52 @@ func NewOpenHardwareMonitorCollector(logger log.Logger) (Collector, error) {
 	const subsystem = "open_hardware_monitor"
 	return &SensorCollector{
 		logger: log.With(logger, "collector", subsystem),
-		Value: prometheus.NewDesc(
-			prometheus.BuildFQName(Namespace, subsystem, "sensor_value"),
-			"Provides the value from an OpenHardwareMonitor sensor.",
-			[]string{"parent", "index", "name", "sensor_type"},
+		Clock: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_clock_mhz"),
+			"Clock speed from an OpenHardwareMonitor sensor in megahertz",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		Control: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_control_percent"),
+			"Duty cycle from an OpenHardwareMonitor sensor in percent",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		FanSpeed: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_fan_speed_rpm"),
+			"Fan speed from an OpenHardwareMonitor sensor in revolutions per minute",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		Flow: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_flow_liters_per_hour"),
+			"Flow from an OpenHardwareMonitor sensor in liters per hour",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		Level: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_level_percent"),
+			"Generic level measure from an OpenHardwareMonitor sensor in percent",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		Load: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_load_percent"),
+			"Load from an OpenHardwareMonitor sensor in percentages",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		Temperature: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_temperature_degrees"),
+			"Temperature from an OpenHardwareMonitor sensor in degrees Celsius",
+			[]string{"parent", "index", "name"},
+			nil,
+		),
+		Voltage: prometheus.NewDesc(
+			prometheus.BuildFQName(Namespace, subsystem, "sensor_voltage_volts"),
+			"Voltage from an OpenHardwareMonitor sensor in volts",
+			[]string{"parent", "index", "name"},
 			nil,
 		),
 	}, nil
@@ -66,16 +108,28 @@ func (c *SensorCollector) collect(ch chan<- prometheus.Metric) (*prometheus.Desc
 		return nil, err
 	}
 
+	descMap := map[string]*prometheus.Desc{
+		"Clock":       c.Clock,
+		"Control":     c.Control,
+		"Fan":         c.FanSpeed,
+		"Flow":        c.Flow,
+		"Level":       c.Level,
+		"Load":        c.Load,
+		"Temperature": c.Temperature,
+		"Voltage":     c.Voltage,
+	}
+
 	for _, info := range dst {
-		ch <- prometheus.MustNewConstMetric(
-			c.Value,
-			prometheus.GaugeValue,
-			float64(info.Value),
-			info.Parent,
-			strconv.Itoa(int(info.Index)),
-			info.Name,
-			info.SensorType,
-		)
+		if desc, exists := descMap[info.SensorType]; exists {
+			ch <- prometheus.MustNewConstMetric(
+				desc,
+				prometheus.GaugeValue,
+				float64(info.Value),
+				info.Parent,
+				strconv.Itoa(int(info.Index)),
+				info.Name,
+			)
+		}
 	}
 
 	return nil, nil
